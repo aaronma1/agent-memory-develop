@@ -12,6 +12,7 @@
 #   serve.sh setup     create venv, install vLLM, download models (no GPU needed)
 #   serve.sh           setup + start + self-test, print the .env snippet, then wait in the
 #                      foreground; Ctrl-C stops all services
+#   serve.sh serve     like the default, but skips setup (use after `setup` has run)
 #   serve.sh test      rerun the self-test against running services
 #
 # GPU allocation:
@@ -233,8 +234,9 @@ EOF
 case "${1:-up}" in
   setup) setup ;;
   test) smoke_test ;;
-  up)
-    setup
+  up|serve)
+    # serve: skip setup (venv and models already staged), so a GPU job starts serving at once.
+    [[ "${1:-up}" == up ]] && setup
     start
     smoke_test
     print_env
@@ -242,5 +244,5 @@ case "${1:-up}" in
     wait -n "${PIDS[@]}" || true
     die "a service exited unexpectedly; see $LOG_DIR"
     ;;
-  *) die "unknown subcommand: $1 (available: setup | up | test)" ;;
+  *) die "unknown subcommand: $1 (available: setup | up | serve | test)" ;;
 esac
