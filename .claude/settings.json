@@ -11,8 +11,8 @@
       "Bash(ls *)",
       "Bash(pwd)",
       "Bash(cat *)",
-      "Grep(*)",
-      "Read(*)"
+      "Grep",
+      "Read"
     ],
     "deny": [
       "Read(./.env)",

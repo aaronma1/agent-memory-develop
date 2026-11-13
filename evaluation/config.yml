@@ -42,3 +42,24 @@ locomo:
   skip_write: false
   # 默认保留本轮后端数据用于 bad case/evidence 溯源。
   cleanup_after_run: false
+
+m3bench:
+  # download.py --out-dir; only videos downloaded there are evaluated.
+  data_root: ~/data/m3bench/web
+  memory_config: m3bench/config.yml
+  output_root: outputs/m3bench
+  video_ids: []          # when non-empty, evaluate only these videos
+  max_videos: 1          # 0 means all downloaded videos
+  max_qa: 2              # at most N questions per video; 0 means all
+  mode: both             # single | iterative | both
+  rounds: 5              # max iterative rounds (M3-Agent official: 5)
+  top_k: 10
+  chunk_seconds: 30
+  ingest_concurrency: 2
+  qa_concurrency: 4
+  # memory: in-process stores; deploy: Redis/ES/Milvus borrowed from locomo/config.yml.
+  storage: memory
+  # Only to reuse an old Scope with deploy storage: run_meta.json's scope_org minus "m3bench-".
+  scope_tag: ""
+  skip_write: false
+  no_cache: false

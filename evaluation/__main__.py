@@ -136,12 +136,51 @@ def _locomo_args(config_file: Path, settings: dict[str, Any]) -> list[str]:
     return args
 
 
+def _m3bench_args(config_file: Path, settings: dict[str, Any]) -> list[str]:
+    args = [
+        "--data-root",
+        str(Path(str(settings.get("data_root", "~/data/m3bench/web"))).expanduser()),
+        "--config",
+        _resolve_path(config_file, str(settings.get("memory_config", "m3bench/config.yml"))),
+        "--output-root",
+        _resolve_path(config_file, str(settings.get("output_root", "outputs/m3bench"))),
+        "--video-ids",
+        ",".join(str(value) for value in settings.get("video_ids", [])),
+        "--max-videos",
+        str(settings.get("max_videos", 1)),
+        "--max-qa",
+        str(settings.get("max_qa", 2)),
+        "--mode",
+        str(settings.get("mode", "both")),
+        "--rounds",
+        str(settings.get("rounds", 5)),
+        "--top-k",
+        str(settings.get("top_k", 10)),
+        "--chunk-seconds",
+        str(settings.get("chunk_seconds", 30)),
+        "--ingest-concurrency",
+        str(settings.get("ingest_concurrency", 2)),
+        "--qa-concurrency",
+        str(settings.get("qa_concurrency", 4)),
+        "--storage",
+        str(settings.get("storage", "memory")),
+    ]
+    scope_tag = str(settings.get("scope_tag", "")).strip()
+    if scope_tag:
+        args.extend(["--scope-tag", scope_tag])
+    if settings.get("skip_write", False):
+        args.append("--skip-write")
+    if settings.get("no_cache", False):
+        args.append("--no-cache")
+    return args
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="agent-memory 独立端到端测评")
     parser.add_argument("--config", default=str(_DEFAULT_CONFIG), help="统一启动配置 YAML")
     parser.add_argument(
         "--benchmark",
-        choices=("longmemeval", "locomo"),
+        choices=("longmemeval", "locomo", "m3bench"),
         default=None,
         help="临时覆盖配置中的 benchmark",
     )
@@ -153,8 +192,8 @@ def main(argv: list[str] | None = None) -> int:
     config_file = Path(args.config).resolve()
     config = _load_config(config_file)
     benchmark = args.benchmark or str(config.get("benchmark", "longmemeval"))
-    if benchmark not in ("longmemeval", "locomo"):
-        raise RuntimeError("benchmark 只能是 longmemeval 或 locomo")
+    if benchmark not in ("longmemeval", "locomo", "m3bench"):
+        raise RuntimeError("benchmark 只能是 longmemeval、locomo 或 m3bench")
     settings = config.get(benchmark, {})
     if not isinstance(settings, dict):
         raise RuntimeError(f"{benchmark} 配置必须是映射")
@@ -163,6 +202,11 @@ def main(argv: list[str] | None = None) -> int:
         from evaluation.longmemeval.entry import main as benchmark_main
 
         return benchmark_main(_longmemeval_args(config_file, settings))
+
+    if benchmark == "m3bench":
+        from evaluation.m3bench.run import main as benchmark_main
+
+        return benchmark_main(_m3bench_args(config_file, settings))
 
     from evaluation.locomo.entry import main as benchmark_main
 

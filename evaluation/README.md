@@ -306,3 +306,45 @@ docker compose -f evaluation\environment\docker-compose.yml down --volumes
 
 `.gitignore` 已覆盖以上本地产物。`.env.example` 中 API 地址与密钥保持为空，仅保留
 `127.0.0.1` 本地 Redis、Elasticsearch、Milvus 地址，方便一键拉起本地后端。
+
+## 十三、M3-Bench (video memory)
+
+The M3-Bench web subset evaluates video memory. Each video is ingested with
+`MemoryAPI.add(source=VIDEO)` (VideoNormalizer → VideoMemoryExtractor produce clip-level CLM and
+event-level ELM memories; see `docs/features/construction/F05-construction-spec-multimodal-design.md`),
+then answered with the M3-Agent control loop (`[Search]` / `[Answer]`, answer forced on the last
+round), then judged with the official GPT-4o judge prompt. The judge and control prompts are copied
+verbatim from [ByteDance-Seed/m3-agent](https://github.com/ByteDance-Seed/m3-agent) (Apache-2.0),
+minus the character-ID lookup hint, which has no counterpart in this system; see `m3bench/prompts.py`.
+
+1. Download videos (pause/resume supported):
+   `python -m evaluation.m3bench.download --out-dir ~/data/m3bench/web`
+2. Set `OPENROUTER_API_KEY` in `evaluation/environment/.env`; for a self-hosted vLLM set
+   `M3BENCH_*_BASE_URL` / `*_MODEL` (see `.env.example`). Without `M3BENCH_ASR_BASE_URL` a silent
+   ASR is used and memory comes from the visual stream only; without `EMBED_BASE_URL` the vector
+   channel uses hashing.
+3. Set `benchmark: m3bench` in `evaluation/config.yml`, or run directly:
+   `python -m evaluation.m3bench.run --max-videos 1 --max-qa 2 --mode both`
+
+- One Scope per video (`org=m3bench-<scope_tag>`, `user=v_<video_id>`); retrieval never crosses videos.
+- `single`: retrieve once with the question, then answer; `iterative`: start from empty knowledge,
+  up to `--rounds` rounds (official: 5).
+- Video normalization (per-clip VLM/ASR) is cached under
+  `<data_root>/memory_cache/<VLM>__<text model>__<ASR>__c<clip seconds>/`, so reruns only redo
+  construction, retrieval and answering; `--no-cache` turns it off.
+- `--storage memory` (default) uses in-process stores; `--storage deploy` borrows Redis/ES/Milvus
+  from `locomo/config.yml` and can reuse ingested memory with `--scope-tag` + `--skip-write`.
+- Only downloaded videos are evaluated; `metrics.json` records coverage (share of videos/questions
+  on disk). State it when comparing with paper scores.
+- Artifacts: `evaluation/outputs/m3bench/<run_id>/` holds `ingest.jsonl`, `results.jsonl` (with
+  every round's retrieval and model output), `metrics.json` (accuracy per mode and question type),
+  `run_meta.json`, `run.log`, `engine.log`.
+- Re-judging: `python -m evaluation.m3bench.rejudge <results.jsonl> --base-url <url> --model <name>`
+  scores saved answers with another OpenAI-compatible judge (e.g. Ollama, or gpt-4o on OpenRouter
+  with `--api-key-env OPENROUTER_API_KEY`) and writes `judge_<model>/judged.jsonl` + `metrics.json`
+  next to the input, leaving `results.jsonl` untouched.
+- Self-hosted models: `evaluation/m3bench/vllm/serve.sh` installs vLLM on an A100, downloads and
+  starts Qwen3-VL-8B-Instruct (text + video, :8000), whisper-large-v3-turbo (:8001) and bge-m3
+  (:8002), runs a self-test and prints the variables to put in `.env`; judging still uses gpt-4o
+  on OpenRouter. On one GPU the three services share it; with more, the last GPU hosts
+  ASR + embedding and the rest run chat data-parallel. Only GPUs with no processes are used.

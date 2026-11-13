@@ -1,0 +1,133 @@
+# M3-Bench kernel assembly config (video memory: VideoNormalizer -> VideoMemoryExtractor ->
+# MultimodalRetriever).
+#
+# Skeleton taken from examples/config_multimodal.yml. Model endpoints come from env vars; run.py
+# fills in defaults before assembly:
+#   M3BENCH_LLM_BASE_URL / M3BENCH_LLM_API_KEY      text LLM (default OpenRouter + OPENROUTER_API_KEY)
+#   M3BENCH_TEXT_MODEL                             video event segmentation/summary, shared kernel LLM
+#   M3BENCH_VLM_BASE_URL / _API_KEY / M3BENCH_VLM_MODEL   per-clip vision (default: text endpoint)
+#   M3BENCH_ASR_*                                  optional; without M3BENCH_ASR_BASE_URL run.py
+#                                                  uses silent ASR and builds memory from video only
+# Switching to a self-hosted vLLM only changes these env vars, not this file.
+#
+# run.py adds the following at assembly time from the run arguments; they are not hard-coded here:
+#   - wraps the normalizer video route in m3bench_cached_video (caches output per VLM model)
+#   - local_media_roots (one Scope per video, all pointing at the video directory)
+#   - embedder (OpenAI-compatible bge-m3 when EMBED_BASE_URL is set, else kernel default hashing)
+#   - Redis/ES/Milvus sections borrowed from locomo/config.yml with --storage deploy
+#   - globals.log_file
+profile: local
+
+memory_api:
+  globals:
+    ingest_max_workers: 1
+    ingest_max_pending_jobs: 2
+    graph_enabled: false
+    rerank_enabled: false
+    llm_model: "${M3BENCH_TEXT_MODEL}"
+    llm_base_url: "${M3BENCH_LLM_BASE_URL}"
+    llm_api_key: "${M3BENCH_LLM_API_KEY}"
+    llm_temperature: 0.0
+    llm_max_tokens: 4096
+
+  llm:
+    default:
+      target: openai
+    video_text:
+      target: openai
+      params:
+        llm_model: "${M3BENCH_TEXT_MODEL}"
+        llm_base_url: "${M3BENCH_LLM_BASE_URL}"
+        llm_api_key: "${M3BENCH_LLM_API_KEY}"
+        llm_temperature: 0.0
+        config_namespace: llm.video_text
+    video_vision:
+      target: openai
+      params:
+        llm_model: "${M3BENCH_VLM_MODEL}"
+        llm_base_url: "${M3BENCH_VLM_BASE_URL}"
+        llm_api_key: "${M3BENCH_VLM_API_KEY}"
+        llm_temperature: 0.0
+        config_namespace: llm.video_vision
+
+  asr:
+    video:
+      target: openai_transcription
+      params:
+        asr_model: "${M3BENCH_ASR_MODEL}"
+        asr_base_url: "${M3BENCH_ASR_BASE_URL}"
+        asr_api_key: "${M3BENCH_ASR_API_KEY:-dummy}"
+        config_namespace: asr.video
+
+  normalizer:
+    default:
+      target: routing
+      params:
+        routes:
+          video:
+            target: video
+            params:
+              chunk_seconds: 30
+              asr_port: video
+              asr_chunk_seconds: 600
+              llm_port: video_text
+              vlm_port: video_vision
+              vlm_max_inline_video_bytes: 52428800
+              temp_root: /tmp/agent-memory-video
+
+  extractor:
+    video:
+      target: video_memory
+
+  # Queries pass through unchanged, no LLM rewrite (same as locomo/config.yml).
+  query_parser:
+    default:
+      target: simple
+      params:
+        tokenizer: default
+        embedder: default
+        feature_extractor: default
+        llm: { target: echo }
+
+  retriever:
+    multimodal:
+      target: multimodal
+      params:
+        base_retriever: default
+        clip_top_k: 10
+        event_top_k: 10
+        rrf_k: 60
+
+  evolver:
+    video:
+      target: orchestrating
+      params:
+        extractor: video
+        abstractor: default
+        associator: default
+        index_builder: default
+        kv_store: default
+        graph_store: default
+        dedup: default
+        llm: default
+        layer_annotator: null
+
+  pipeline:
+    default:
+      target: metadata
+      params:
+        route_key: pipeline
+        fallback: default
+        routes:
+          video: video
+        profiles:
+          default:
+            index_builder: default
+            retriever: multimodal
+            evolver: default
+            classifier: default
+          video:
+            index_builder: default
+            retriever: multimodal
+            evolver: video
+            classifier: default
